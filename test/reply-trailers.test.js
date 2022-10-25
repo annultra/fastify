@@ -110,30 +110,116 @@ test('send trailers when payload is json', t => {
   })
 })
 
-test('send trailers when payload is stream', t => {
-  t.plan(7)
+test('send trailers when payload is stream', ({ test, plan }) => {
+  plan(3)
 
-  const fastify = Fastify()
+  test('discard data', t => {
+    t.plan(7)
 
-  fastify.get('/', function (request, reply) {
-    reply.trailer('ETag', function (reply, payload) {
-      t.same(payload, null)
-      return 'custom-etag'
+    const fastify = Fastify()
+
+    fastify.get('/', function (request, reply) {
+      reply.trailer('ETag', function (reply, payload) {
+        t.same(typeof payload.pipe === 'function', true)
+        // discard all data
+        payload.on('data', () => {})
+        return 'custom-etag'
+      })
+      const stream = Readable.from([JSON.stringify({ hello: 'world' })])
+      reply.send(stream)
     })
-    const stream = Readable.from([JSON.stringify({ hello: 'world' })])
-    reply.send(stream)
+
+    fastify.inject({
+      method: 'GET',
+      url: '/'
+    }, (error, res) => {
+      t.error(error)
+      t.equal(res.statusCode, 200)
+      t.equal(res.headers['transfer-encoding'], 'chunked')
+      t.equal(res.headers.trailer, 'etag')
+      t.equal(res.trailers.etag, 'custom-etag')
+      t.notHas(res.headers, 'content-length')
+    })
   })
 
-  fastify.inject({
-    method: 'GET',
-    url: '/'
-  }, (error, res) => {
-    t.error(error)
-    t.equal(res.statusCode, 200)
-    t.equal(res.headers['transfer-encoding'], 'chunked')
-    t.equal(res.headers.trailer, 'etag')
-    t.equal(res.trailers.etag, 'custom-etag')
-    t.notHas(res.headers, 'content-length')
+  test('pipe to cloned stream', t => {
+    t.plan(8)
+
+    const fastify = Fastify()
+
+    fastify.get('/', function (request, reply) {
+      reply.trailer('ETag', function (reply, payload, callback) {
+        let value = ''
+        t.same(typeof payload.pipe === 'function', true)
+        payload.on('data', (chunk, encoding) => {
+          value += chunk.toString(encoding)
+        })
+        payload.on('end', () => {
+          t.same(value, JSON.stringify({ hello: 'world' }))
+          callback(null, 'custom-etag')
+        })
+      })
+      const stream = Readable.from([JSON.stringify({ hello: 'world' })])
+      reply.send(stream)
+    })
+
+    fastify.inject({
+      method: 'GET',
+      url: '/'
+    }, (error, res) => {
+      t.error(error)
+      t.equal(res.statusCode, 200)
+      t.equal(res.headers['transfer-encoding'], 'chunked')
+      t.equal(res.headers.trailer, 'etag')
+      t.equal(res.trailers.etag, 'custom-etag')
+      t.notHas(res.headers, 'content-length')
+    })
+  })
+
+  test('pipe multiple times', t => {
+    t.plan(11)
+
+    const fastify = Fastify()
+
+    fastify.get('/', function (request, reply) {
+      reply.trailer('ETag', function (reply, payload, callback) {
+        let value = ''
+        t.same(typeof payload.pipe === 'function', true)
+        payload.on('data', (chunk, encoding) => {
+          value += chunk.toString(encoding)
+        })
+        payload.on('end', () => {
+          t.same(value, JSON.stringify({ hello: 'world' }))
+          callback(null, 'custom-etag')
+        })
+      })
+      reply.trailer('Foo', function (reply, payload, callback) {
+        let value = ''
+        t.same(typeof payload.pipe === 'function', true)
+        payload.on('data', (chunk, encoding) => {
+          value += chunk.toString(encoding)
+        })
+        payload.on('end', () => {
+          t.same(value, JSON.stringify({ hello: 'world' }))
+          callback(null, 'bar')
+        })
+      })
+      const stream = Readable.from([JSON.stringify({ hello: 'world' })])
+      reply.send(stream)
+    })
+
+    fastify.inject({
+      method: 'GET',
+      url: '/'
+    }, (error, res) => {
+      t.error(error)
+      t.equal(res.statusCode, 200)
+      t.equal(res.headers['transfer-encoding'], 'chunked')
+      t.equal(res.headers.trailer, 'etag foo')
+      t.equal(res.trailers.etag, 'custom-etag')
+      t.equal(res.trailers.foo, 'bar')
+      t.notHas(res.headers, 'content-length')
+    })
   })
 })
 
