@@ -234,22 +234,57 @@ as soon as possible.
 *Note: The header `Transfer-Encoding: chunked` will be added once you use the
 trailer. It is a hard requirement for using trailer in Node.js.*
 
-*Note: Currently, the computation function only supports synchronous function.
-That means `async-await` and `promise` are not supported.*
-
 ```js
-reply.trailer('server-timing', function() {
-  return 'db;dur=53, app;dur=47.2'
+reply.trailer('server-timing', function(reply, payload, done) {
+  done(null, 'db;dur=53, app;dur=47.2')
 })
 
 const { createHash } = require('crypto')
 // trailer function also recieve two argument
 // @param {object} reply fastify reply
-// @param {string|Buffer|null} payload payload that already sent, note that it will be null when stream is sent
-reply.trailer('content-md5', function(reply, payload) {
+// @param {string|Buffer|Readable} payload payload that already sent
+reply.trailer('content-md5', function(reply, payload, done) {
   const hash = createHash('md5')
-  hash.update(payload)
-  return hash.disgest('hex')
+  // it is recommended to attach `data` event
+  // as soon as possible
+  payload.on('data', (chunk) => {
+    hash.update(chunk)
+  })
+  payload.on('error', (err) => {
+    done(err)
+  })
+  payload.on('end', () => {
+    done(null, hash.disgest('hex'))
+  })
+})
+```
+
+For the `stream` consumer, it is recommended to use `data` event. The stream is 
+shared over all trailer handler to reduce `memory` spark. If there is need of
+separete handler or long prepration job before the handler. You can clone the
+data with an extra `PassThrough`.
+
+```js
+const { PassThrough, Writable } = require('stream')
+reply.trailer('Long-Task', function(reply, payload, done) {
+  // prepare pass through
+  const stream = new PassThrough()
+  payload.on('data', (chunk) => {
+    // reserve data for later usage
+    stream.push(chunk)
+  })
+  payload.on('end', () => {
+    // end the stream
+    stream.push(null)
+  })
+
+  // heavy task
+  // ...
+  const consumer = new Writable()
+  consumer.on('end', () => {
+    done(null, 'done')
+  })
+  stream.pipe(consumer)
 })
 ```
 
