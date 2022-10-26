@@ -113,7 +113,7 @@ test('send trailers when payload is json', t => {
 test('send trailers when payload is stream', ({ test, plan }) => {
   plan(3)
 
-  test('discard data', t => {
+  test('stream is exist', t => {
     t.plan(7)
 
     const fastify = Fastify()
@@ -121,8 +121,7 @@ test('send trailers when payload is stream', ({ test, plan }) => {
     fastify.get('/', function (request, reply) {
       reply.trailer('ETag', function (reply, payload) {
         t.same(typeof payload.pipe === 'function', true)
-        // discard all data
-        payload.on('data', () => {})
+        payload.resume() // discard
         return 'custom-etag'
       })
       const stream = Readable.from([JSON.stringify({ hello: 'world' })])

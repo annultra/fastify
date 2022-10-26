@@ -245,8 +245,6 @@ const { createHash } = require('crypto')
 // @param {string|Buffer|Readable} payload payload that already sent
 reply.trailer('content-md5', function(reply, payload, done) {
   const hash = createHash('md5')
-  // it is recommended to attach `data` event
-  // as soon as possible
   payload.on('data', (chunk) => {
     hash.update(chunk)
   })
@@ -259,10 +257,12 @@ reply.trailer('content-md5', function(reply, payload, done) {
 })
 ```
 
-For the `stream` consumer, it is recommended to use `data` event. The stream is 
-shared over all trailer handler to reduce `memory` spark. If there is need of
-separete handler or long prepration job before the handler. You can clone the
-data with an extra `PassThrough`.
+For the `stream` consumer, it is recommended to consume the stream as
+soon as possible. If there are missing handler for stream, it will
+block the sending of payload until all stream properly start consuming.
+If there is needs of long prepration job before the handler. You can
+inspect the stream first (You may expect the memory will spark since
+the data is copied inside buffer). Then, handle it in later stage.
 
 ```js
 const { PassThrough, Writable } = require('stream')
